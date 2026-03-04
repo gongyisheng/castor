@@ -54,16 +54,31 @@ async def _execute_tools(
                     results.append(ToolMessage.cancelled(remaining_tc.id))
             break
 
+        task = tasks[tc.id]
+        cancel_waiter = asyncio.create_task(cancel.wait())
         try:
-            tool_result = await tasks[tc.id]
-            results.append(
-                ToolMessage(
-                    tool_call_id=tool_result.tool_call_id,
-                    content=tool_result.output,
-                    is_error=tool_result.is_error,
-                )
+            done, _ = await asyncio.wait(
+                [task, cancel_waiter], return_when=asyncio.FIRST_COMPLETED,
             )
+            if task in done:
+                tool_result = task.result()
+                results.append(
+                    ToolMessage(
+                        tool_call_id=tool_result.tool_call_id,
+                        content=tool_result.output,
+                        is_error=tool_result.is_error,
+                    )
+                )
+            else:
+                # cancel fired — cancel this and all remaining tasks
+                for remaining_tc in response.tool_calls:
+                    if remaining_tc.id not in {r.tool_call_id for r in results}:
+                        tasks[remaining_tc.id].cancel()
+                        results.append(ToolMessage.cancelled(remaining_tc.id))
+                break
         except asyncio.CancelledError:
             results.append(ToolMessage.cancelled(tc.id))
+        finally:
+            cancel_waiter.cancel()
 
     return results

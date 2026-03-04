@@ -91,3 +91,42 @@ async def test_max_iterations():
 
     # 3 iterations: each adds assistant + tool = 6, plus original user = 7
     assert provider._idx == 3
+
+
+async def test_interrupt_during_tool_execution():
+    """Cancel during tool execution: completed tools keep results, pending cancelled."""
+    tc1 = ToolCall(id="tc_1", name="echo", arguments={"text": "fast"})
+    tc2 = ToolCall(id="tc_2", name="slow", arguments={"delay": 5})
+    provider = FakeProvider([
+        AssistantMessage(content="doing both", tool_calls=[tc1, tc2]),
+    ])
+    messages = [UserMessage(content="do stuff")]
+    cancel = asyncio.Event()
+
+    async def interrupt_soon():
+        await asyncio.sleep(0.1)
+        cancel.set()
+
+    asyncio.create_task(interrupt_soon())
+    result = await agent_loop(
+        messages, provider, make_registry(EchoTool(), SlowTool()), cancel,
+    )
+
+    # user + assistant + tool results (some completed, some cancelled)
+    tool_msgs = [m for m in result if m.role == "tool"]
+    assert len(tool_msgs) == 2
+    contents = {m.content for m in tool_msgs}
+    assert "[cancelled by user]" in contents
+
+
+async def test_interrupt_before_llm_call():
+    """Cancel before LLM call: loop exits immediately."""
+    provider = FakeProvider([AssistantMessage(content="never")])
+    messages = [UserMessage(content="hi")]
+    cancel = asyncio.Event()
+    cancel.set()  # already cancelled
+
+    result = await agent_loop(messages, provider, make_registry(), cancel)
+
+    assert len(result) == 1  # only original user message
+    assert provider._idx == 0  # LLM never called
