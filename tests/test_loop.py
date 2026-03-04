@@ -130,3 +130,36 @@ async def test_interrupt_before_llm_call():
 
     assert len(result) == 1  # only original user message
     assert provider._idx == 0  # LLM never called
+
+
+async def test_interrupt_during_second_llm_call():
+    """Case 3: cancel during LLM call mid-loop — prior results kept, incomplete discarded."""
+    cancel = asyncio.Event()
+
+    class InterruptingProvider(Provider):
+        def __init__(self):
+            self._idx = 0
+
+        async def complete(self, messages, tools=None):
+            self._idx += 1
+            if self._idx == 1:
+                # first call: return tool call
+                tc = ToolCall(id="tc_1", name="echo", arguments={"text": "done"})
+                return AssistantMessage(content="working", tool_calls=[tc])
+            else:
+                # second call: cancel fires during this call
+                cancel.set()
+                return AssistantMessage(content="should be discarded")
+
+    messages = [UserMessage(content="do X")]
+    result = await agent_loop(
+        messages, InterruptingProvider(), make_registry(EchoTool()), cancel,
+    )
+
+    # Should have: user, assistant+tc, tool result — but NOT the second assistant
+    assert len(result) == 3
+    assert result[0].role == "user"
+    assert result[1].role == "assistant"
+    assert result[1].content == "working"
+    assert result[2].role == "tool"
+    assert result[2].content == "done"
