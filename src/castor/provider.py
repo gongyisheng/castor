@@ -1,7 +1,7 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 
-from castor.types import AssistantMessage, Message, ToolCall
+from castor.types import AssistantMessage, Message
 
 
 class Provider(ABC):

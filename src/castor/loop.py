@@ -3,9 +3,7 @@ import asyncio
 
 from castor.provider import Provider
 from castor.tool import ToolRegistry
-from castor.types import (
-    AssistantMessage, Message, ToolMessage, UserMessage,
-)
+from castor.types import AssistantMessage, Message, ToolMessage
 
 
 async def agent_loop(
